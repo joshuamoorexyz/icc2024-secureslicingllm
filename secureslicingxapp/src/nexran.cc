@@ -1,6 +1,14 @@
 
 #include <chrono>
 #include <string>
+//----------------------
+#include <iostream>
+#include <cstring>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+//----------------------
 
 #include "mdclog/mdclog.h"
 #include "rmr/RIC_message_types.h"
@@ -28,12 +36,67 @@ int COUNTER2=0;
 bool malicious=0;
 bool slicecheck=0;
 int tx_threshold = 130;
+int conn = -1;
 
 std::string slice1 = "fast";
 std::string slice2 = "secure_slice";
 
 std::string ue1imsi = "NULL";
 std::string ue2imsi = "NULL";
+
+//--------------------TCP Server--------------------
+int tcp_server(const char* address, int port) {
+    int listeningSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (listeningSocket == -1) {
+        //std::cerr << "Failed to create socket." << std::endl;
+        return -1;
+    }
+    sockaddr_in serverAddress;
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_addr.s_addr = inet_addr(address);
+    serverAddress.sin_port = htons(port);
+
+    if (bind(listeningSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) == -1) {
+        //std::cerr << "Bind failed." << std::endl;
+        close(listeningSocket);
+        return -1;
+    }
+
+    if (listen(listeningSocket, 10) == -1) {
+        //std::cerr << "Listen failed." << std::endl;
+        close(listeningSocket);
+        return -1;
+    }
+
+    //std::cout << "Listening started, ready to connect." << std::endl;
+    extern int conn;
+    while (true) {
+        sockaddr_in clientAddress;
+        socklen_t clientAddressSize = sizeof(clientAddress);
+        conn = accept(listeningSocket, (struct sockaddr*)&clientAddress, &clientAddressSize);
+        if (conn == -1) {
+            //std::cerr << "Accept failed." << std::endl;
+            close(listeningSocket);
+            return -1;
+        }
+        //std::cout << "Connection accepted" << std::endl;
+    }
+    close(listeningSocket);
+    return 0;
+}
+string reveive(int conn) {
+    char buffer[1024];
+    string recievedMessage;
+    int bytesReceived = recv(conn, buffer, sizeof(buffer), 0);
+    buffer[bytesReceived] = '\0';
+    recievedMessage += buffer;
+    return recievedMessage;
+}
+void send(int conn, string message) {
+    const char* messageBytes = message.c_str();
+    send(conn, messageBytes, strlen(messageBytes), 0);
+}
+//--------------------------------------------------
 
 namespace nexran {
 
@@ -260,7 +323,10 @@ bool App::handle(e2sm::kpm::KpmIndication *kind)
 	    mdclog_write(MDCLOG_ERR,"failed to write KPM points to influxdb");
 	}
     }
-
+    //------------------------------
+    send(conn, /*KPM report*/);
+    string response = recieve(conn);
+    //------------------------------
     // If we don't have BW reports for all slices, do not modify proportions?
     // Add up all slice dl_bytes, get proportions
     // map those to share proportions
