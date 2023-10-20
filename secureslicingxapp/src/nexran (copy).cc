@@ -1,21 +1,14 @@
 
 #include <chrono>
 #include <string>
-#include "rapidjson/prettywriter.h"
-#include "rapidjson/document.h"
-#include "rapidjson/stringbuffer.h"
-#include "rapidjson/filewritestream.h"
-#include <cstdio>
-#include <fstream>
-#include<iostream>
-#include "rapidjson/writer.h"
+
 #include "mdclog/mdclog.h"
 #include "rmr/RIC_message_types.h"
 #include "ricxfcpp/message.hpp"
 #include "ricxfcpp/messenger.hpp"
 //#include "pistache/string_logger.h"
 //#include "pistache/tcp.h"
-#include<vector>
+
 #include "nexran.h"
 #include "e2ap.h"
 #include "e2sm.h"
@@ -23,21 +16,14 @@
 #include "e2sm_kpm.h"
 #include "e2sm_zylinium.h"
 #include "restserver.h"
-#include <iostream>
-#include <cstring>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <iterator> 
-
-
-
-
-
 //#include "restserver.cc"
-using namespace rapidjson;
+
+
+//include for socket connection to local llm
+#include <iostream>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
 using namespace std;
 
 int TX_PKTS=0;
@@ -48,15 +34,6 @@ int COUNTER2=0;
 bool malicious=0;
 bool slicecheck=0;
 int tx_threshold = 130;
-
-
-std::vector<double> legit1ue = {1.0,74475.0, 72798.0, 3064.0, 1264.0, 6663314.0, 6527328.0, 108524.0, 52676.0, 74475.0, 72798.0, 3064.0, 1264.0, 306.0, 0.0, 0.0, 0.0, 10927200.0, 0.0, 57.0, 0.0, 0.0, 0.0, 288288.0, 0.0, 15.0, 15.0, 0.0, 0.0, 0.0, 0.0, 30.0, 0.0, 116.571, 0.0, 23.4375, 0.0, 135.0, 0.0, 28.0, 0.0};
-std::vector<double> legit2ue = {2.0,89703.0, 44283.0, 4032.0, 1671.0, 7947136.0, 4351222.0, 148072.0, 51220.0, 89703.0, 44283.0, 4032.0, 1671.0, 653.0, 0.0, 0.0, 0.0, 23451912.0, 0.0, 93.0, 0.0, 0.0, 0.0, 339256.0, 0.0, 15.0, 0.0, 0.0, 0.0, 0.0, 0.0, 30.0, 0.0, 117.972, 0.0, 23.0, 0.0, 176.0, 0.0, 28.0, 0.0};
-
-
-
-
-
 
 std::string slice1 = "fast";
 std::string slice2 = "secure_slice";
@@ -219,12 +196,33 @@ bool App::handle(e2sm::nexran::SliceStatusIndication *ind)
 
 //struct for Metric array
 struct Metric {
-	long long int numericValue;
+	long logn int numericValue;
 	std::string stringValue;
 };
 
 bool App::handle(e2sm::kpm::KpmIndication *kind)
 {
+
+    int sockfd;
+    struct sockaddr_in serverAddr;
+
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1) {
+        perror("Socket creation failed");
+        return 1;
+    }
+
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(4693); // Replace with the actual port
+    serverAddr.sin_addr.s_addr = inet_addr("130.18.64.54"); // Replace with the host's IP
+
+  if (connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1) {
+        perror("Connection failed");
+        return 1;
+    }
+
+
+
     mdclog_write(MDCLOG_INFO,"KpmIndication: %s",
 		 kind->report->to_string('\n',',').c_str());
 
@@ -250,6 +248,8 @@ bool App::handle(e2sm::kpm::KpmIndication *kind)
 	influxdb->batchOf(report->slices.size() + report->ues.size());
 	for (auto it = report->slices.begin(); it != report->slices.end(); ++it) {
 
+
+
 	    influxdb->write(influxdb::Point{"slice"}
 		.addField("dl_bytes", (long long int)it->second.dl_bytes)
 		.addField("ul_bytes", (long long int)it->second.ul_bytes)
@@ -273,12 +273,136 @@ bool App::handle(e2sm::kpm::KpmIndication *kind)
 		.addTag("slice", it->first.c_str())
 		.addTag("nodeb", rname.c_str()));
 	}
-	
 	for (auto it = report->ues.begin(); it != report->ues.end(); ++it) {
 
 
        	 // Create a Metric instance for each metric and store in the array
-	    
+	   Metric dlBytesMetric;
+           dlBytesMetric.numericValue = (long long int)it->second.dl_bytes;
+	   dlBytesMetric.stringValue = "dl_bytes";
+           metricArray.push_back(dlBytesMetric);
+
+           Metric ulBytesMetric;
+           ulBytesMetric.numericValue = (long long int)it->second.ul_bytes;
+	   ulBytesMetric.stringValue = "ul_bytes";
+	   metricArray.push_back(ulBytesMetric); 
+
+	   Metric dlprbsMetric;
+	   dlprbsMetric.numericValue = (long long int)it->second.dl_prbs;
+	   dlprbsMetric.stringValue = "dl_prbs";
+	   metricArray.push_back(dlprbsMetric);
+
+	   Metric ulprbsMetric;
+	   ulprbsMetric.numericValue = (long long int)it->second.ul_prbs;
+	   ulprbsMetric.stringValue = "ul_prbs";
+	   metricArray.push_back(ulprbsMetric);
+		
+	   Metric txpktsMetric;
+   	   txpktsMetric.numericValue = (long long int)it->second.tx_pkts;
+	   txpktsMetric.stringValue = "tx_pkts";
+	   metricArray.push_back(txpktsMetric);
+
+	   Metric txerrorsMetric;
+   	   txerrorsMetric.numericValue = (long long int)it->second.tx_errors;
+	   txerrorsMetric.stringValue = "tx_errors";
+	   metricArray.push_back(txerrorsMetric);
+
+
+	   Metric txbrateMetric;
+   	   txbrateMetric.numericValue = (long long int)it->second.tx_brate;
+	   txbrateMetric.stringValue = "tx_brate";
+	   metricArray.push_back(txbrateMetric);
+
+
+	   Metric rxpktsMetric;
+   	   rxpktsMetric.numericValue = (long long int)it->second.rx_pkts;
+	   rxpktsMetric.stringValue = "rx_pkts";
+	   metricArray.push_back(rxpktsMetric);
+
+	   Metric rxerrorsMetric;
+   	   rxerrorsMetric.numericValue = (long long int)it->second.rx_errors;
+	   rxerrorsMetric.stringValue = "rx_errors";
+	   metricArray.push_back(rxerrorsMetric);
+
+
+	   Metric rxbrateMetric;
+   	   rxbrateMetric.numericValue = (long long int)it->second.rx_brate;
+	   rxbrateMetric.stringValue = "rx_brate";
+	   metricArray.push_back(rxbrateMetric);
+
+	   Metric dlcqiMetric;
+   	   dlcqiMetric.numericValue = (long long int)it->second.dl_cqi;
+	   dlqcqiMetric.stringValue = "dl_cqi";
+	   metricArray.push_back(dlcqiMetric);
+	   
+	   Metric dlriMetric;
+   	   dlriMetric.numericValue = (long long int)it->second.dl_ri;
+	   dlriMetric.stringValue = "dl_ri";
+	   metricArray.push_back(dlriMetric);
+
+
+
+	   Metric dlpmiMetric;
+   	   dlpmiMetric.numericValue = (long long int)it->second.dl_pmi;
+	   dlpmiMetric.stringValue = "dl_pmi";
+	   metricArray.push_back(dlpmiMetric);
+
+
+
+	   Metric ulphrMetric;
+   	   ulphrMetric.numericValue = (long long int)it->second.ul_phr;
+	   ulphrMetric.stringValue = "ul_phr";
+	   metricArray.push_back(ulphrMetric);
+
+
+
+           Metric ulsinrMetric;
+   	   ulsinrMetric.numericValue = (long long int)it->second.ul_sinr;
+	   ulsinrMetric.stringValue = "ul_sinr";
+	   metricArray.push_back(ulsinrMetric);
+
+
+
+	   Metric ulmcsMetric;
+   	   ulmcsMetric.numericValue = (long long int)it->second.ul_mcs;
+	   ulmcsMetric.stringValue = "ul_mcs";
+	   metricArray.push_back(ulmcsMetric);
+           
+
+
+	   Metric ulsamplesMetric;
+   	   ulsamplesMetric.numericValue = (long long int)it->second.ul_samples;
+	   ulsamplesMetric.stringValue = "ul_samples";
+	   metricArray.push_back(ulsamplesMetric);
+
+
+
+	   Metric dlmcsMetric;
+   	   dlmcsMetric.numericValue = (long long int)it->second.dl_mcs;
+	   dlmcsMetric.stringValue = "dl_mcs";
+	   metricArray.push_back(dlmcsMetric);
+
+
+
+	   Metric dlsamplesMetric;
+   	   dlsamplesMetric.numericValue = (long long int)it->second.dl_samples;
+	   dlsamplesMetric.stringValue = "dl_samples";
+	   metricArray.push_back(dsamplesMetric);
+
+
+
+	   Metric uenameMetric;
+   	   uenameMetric.numericValue = 0;
+	   uenameMetric.stringValue = std::to_string(it->first).c_str();
+	   metricArray.push_back(uenameMetric);
+
+
+
+	   Metric nodebnameMetric;
+   	   nodebnameMetric.numericValue = 0;
+	   nodebnameMetric.stringValue = rname.c_str();
+	   metricArray.push_back(nodebnameMetric);
+
 	    influxdb->write(influxdb::Point{"ue"}
 		.addField("dl_bytes", (long long int)it->second.dl_bytes)
 		.addField("ul_bytes", (long long int)it->second.ul_bytes)
@@ -295,16 +419,12 @@ bool App::handle(e2sm::kpm::KpmIndication *kind)
 		.addField("dl_pmi", it->second.dl_pmi)
 		.addField("ul_phr", it->second.ul_phr)
 		.addField("ul_sinr", it->second.ul_sinr)
-	    .addField("ul_mcs", it->second.ul_mcs)
+		.addField("ul_mcs", it->second.ul_mcs)
 		.addField("ul_samples", (long long int)it->second.ul_samples)
 		.addField("dl_mcs", it->second.dl_mcs)
 		.addField("dl_samples", (long long int)it->second.dl_samples)
 		.addTag("ue", std::to_string(it->first).c_str())
 		.addTag("nodeb", rname.c_str()));
-
-		
-		//mdclog_write(MDCLOG_INFO, "Numeric Value: %lld, String Value: %s", nodebnameMetric.numericValue, nodebnameMetric.stringValue.c_str());
-	   // mdclog_write(MDCLOG_INFO, "Nodeb name: %s", rname.c_str());
 	}
 	try {
 	    influxdb->flushBatch();
@@ -359,9 +479,39 @@ bool App::handle(e2sm::kpm::KpmIndication *kind)
 
 
 
-//print the vector for viewing
+ // Send data to the LLM
+    const char* dataToSend = "YourData";
+    send(sockfd, dataToSend, strlen(dataToSend), 0);
 
-//mdclog_write(MDCLOG_INFO, "Size : %d",metricArray.size());
+    // Receive and process LLM's response
+    char buffer[1024];
+    recv(sockfd, buffer, sizeof(buffer), 0);
+
+    // Process and access LLM's output in 'buffer'
+
+    close(sockfd);
+
+
+
+
+
+
+
+
+
+
+
+
+
+//print the vector for viewing
+if (!metricArray.empty()) {
+	    // Loop through the vector and log the contents
+   for (const Metric& metric : metricArray) {
+        mdclog_write(MDCLOG_INFO, "Numeric Value: %lld, String Value: %s", metric.numericValue, metric.stringValue.c_str());
+   }
+} else {
+    mdclog_write(MDCLOG_INFO, "metricArray is empty");
+}
 
 
 //clear the metricArray after sending
@@ -590,244 +740,11 @@ metricArray.clear();
 //fsdkjgksdfkgfdg
 
 
-int ueCount = static_cast<int>(std::distance(report->ues.begin(), report->ues.end()));
-
-
 
 for (auto it = report->ues.begin(); it != report->ues.end(); ++it) {
-		
 
-	// 	 // Create a Metric instance for each metric and store in the array
-	//     Metric dlBytesMetric;
-    //     dlBytesMetric.numericValue = (long long int)it->second.dl_bytes;
-	//     dlBytesMetric.stringValue = "dl_bytes";
-    //     metricArray.push_back(dlBytesMetric);
 
-    //    Metric ulBytesMetric;
-    //    ulBytesMetric.numericValue = (long long int)it->second.ul_bytes;
-	//    ulBytesMetric.stringValue = "ul_bytes";
-	//    metricArray.push_back(ulBytesMetric); 
-
-	//    Metric dlprbsMetric;
-	//    dlprbsMetric.numericValue = (long long int)it->second.dl_prbs;
-	//    dlprbsMetric.stringValue = "dl_prbs";
-	//    metricArray.push_back(dlprbsMetric);
-
-	//    Metric ulprbsMetric;
-	//    ulprbsMetric.numericValue = (long long int)it->second.ul_prbs;
-	//    ulprbsMetric.stringValue = "ul_prbs";
-	//    metricArray.push_back(ulprbsMetric);
-		
-	//    Metric txpktsMetric;
-   	//    txpktsMetric.numericValue = (long long int)it->second.tx_pkts;
-	//    txpktsMetric.stringValue = "tx_pkts";
-	//    metricArray.push_back(txpktsMetric);
-
-	//    Metric txerrorsMetric;
-   	//    txerrorsMetric.numericValue = (long long int)it->second.tx_errors;
-	//    txerrorsMetric.stringValue = "tx_errors";
-	//    metricArray.push_back(txerrorsMetric);
-
-
-	//    Metric txbrateMetric;
-   	//    txbrateMetric.numericValue = (long long int)it->second.tx_brate;
-	//    txbrateMetric.stringValue = "tx_brate";
-	//    metricArray.push_back(txbrateMetric);
-
-
-	//    Metric rxpktsMetric;
-   	//    rxpktsMetric.numericValue = (long long int)it->second.rx_pkts;
-	//    rxpktsMetric.stringValue = "rx_pkts";
-	//    metricArray.push_back(rxpktsMetric);
-
-	//    Metric rxerrorsMetric;
-   	//    rxerrorsMetric.numericValue = (long long int)it->second.rx_errors;
-	//    rxerrorsMetric.stringValue = "rx_errors";
-	//    metricArray.push_back(rxerrorsMetric);
-
-
-	//    Metric rxbrateMetric;
-   	//    rxbrateMetric.numericValue = (long long int)it->second.rx_brate;
-	//    rxbrateMetric.stringValue = "rx_brate";
-	//    metricArray.push_back(rxbrateMetric);
-
-	//    Metric dlcqiMetric;
-   	//    dlcqiMetric.numericValue = (long long int)it->second.dl_cqi;
-	//    dlcqiMetric.stringValue = "dl_cqi";
-	//    metricArray.push_back(dlcqiMetric);
-	   
-	//    Metric dlriMetric;
-   	//    dlriMetric.numericValue = (long long int)it->second.dl_ri;
-	//    dlriMetric.stringValue = "dl_ri";
-	//    metricArray.push_back(dlriMetric);
-
-
-
-	//    Metric dlpmiMetric;
-   	//    dlpmiMetric.numericValue = (long long int)it->second.dl_pmi;
-	//    dlpmiMetric.stringValue = "dl_pmi";
-	//    metricArray.push_back(dlpmiMetric);
-
-
-
-	//    Metric ulphrMetric;
-   	//    ulphrMetric.numericValue = (long long int)it->second.ul_phr;
-	//    ulphrMetric.stringValue = "ul_phr";
-	//    metricArray.push_back(ulphrMetric);
-
-
-
-    //        Metric ulsinrMetric;
-   	//    ulsinrMetric.numericValue = (long long int)it->second.ul_sinr;
-	//    ulsinrMetric.stringValue = "ul_sinr";
-	//    metricArray.push_back(ulsinrMetric);
-
-
-
-	//    Metric ulmcsMetric;
-   	//    ulmcsMetric.numericValue = (long long int)it->second.ul_mcs;
-	//    ulmcsMetric.stringValue = "ul_mcs";
-	//    metricArray.push_back(ulmcsMetric);
-           
-
-
-	//    Metric ulsamplesMetric;
-   	//    ulsamplesMetric.numericValue = (long long int)it->second.ul_samples;
-	//    ulsamplesMetric.stringValue = "ul_samples";
-	//    metricArray.push_back(ulsamplesMetric);
-
-
-
-	//    Metric dlmcsMetric;
-   	//    dlmcsMetric.numericValue = (long long int)it->second.dl_mcs;
-	//    dlmcsMetric.stringValue = "dl_mcs";
-	//    metricArray.push_back(dlmcsMetric);
-
-
-
-	//    Metric dlsamplesMetric;
-   	//    dlsamplesMetric.numericValue = (long long int)it->second.dl_samples;
-	//    dlsamplesMetric.stringValue = "dl_samples";
-	//    metricArray.push_back(dlsamplesMetric);
-
-
-
-	   Metric uenameMetric;
-   	   uenameMetric.numericValue = ueCount;
-	   //uenameMetric.stringValue = std::to_string(it->first).c_str();
-	   metricArray.push_back(uenameMetric);
-	   mdclog_write(MDCLOG_INFO, "Number of UEs: %lld", uenameMetric.numericValue);
-
-
-	//    Metric nodebnameMetric;
-   	//    nodebnameMetric.numericValue = 0;
-	//    nodebnameMetric.stringValue = rname.c_str();
-	//    metricArray.push_back(nodebnameMetric);
-	//    mdclog_write(MDCLOG_INFO, "Numeric Value: %lld, String Value: %s", nodebnameMetric.numericValue, nodebnameMetric.stringValue.c_str());
-	//    mdclog_write(MDCLOG_INFO, "Nodeb name: %s", rname.c_str());
-	    
-
-   // Serialize the metricArray to JSON
-    rapidjson::Document document;
-    document.SetArray();
-
-
-   // Add your metric data to the metricArray
-
-
-   //send number of UEs to the python program
-
-for (const Metric& metric : metricArray) {
-    rapidjson::Value metricObject(rapidjson::kObjectType);
-    metricObject.AddMember("numericValue", static_cast<double>(metric.numericValue), document.GetAllocator());
-    metricObject.AddMember("stringValue", rapidjson::StringRef(metric.stringValue.c_str()), document.GetAllocator());
-    document.PushBack(metricObject, document.GetAllocator());
-}
-
-rapidjson::StringBuffer buffer;
-rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-document.Accept(writer);
-std::string jsonStr = buffer.GetString();
-
-// Send the JSON data over the network
-const char* serverIP = "130.18.64.54";  // Replace with your server's IP address
-int serverPort = 12345;
-
-
-int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
-struct sockaddr_in serverAddr;
-serverAddr.sin_family = AF_INET;
-serverAddr.sin_port = htons(serverPort);
-serverAddr.sin_addr.s_addr = inet_addr(serverIP);  // Use the server's IP address
-connect(clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
-send(clientSocket, jsonStr.c_str(), jsonStr.size(), 0);
-
-
-
-
-
-// Receive and log data from the server using mcdlog
-char buffer1[1024];  // Adjust the buffer size as needed
-ssize_t bytesRead = recv(clientSocket, buffer1, sizeof(buffer1), 0);
-mdclog_write(MDCLOG_DEBUG, "I created bytes.");
-
-// Convert the received bytes to a string
-std::string bytesReceived(buffer1, bytesRead);
-mdclog_write(MDCLOG_DEBUG, "Bytes recieved %s", bytesReceived.c_str());
-
-
-// Split the received data into individual numerical values
-std::vector<double> numericData;
-std::istringstream iss(bytesReceived);
-std::string word;
-int wordCount = 0;
-
-while (iss >> word) {
-    if (wordCount == 0) {
-        wordCount++;
-        continue; // Skip the first value
-    }
-
-    bool isNumeric = true;
-    for (char c : word) {
-        if (!std::isdigit(c) && c != '.' && c != '-') {
-            isNumeric = false;
-            break;
-        }
-    }
-
-    if (isNumeric) {
-        double value = std::stod(word);
-        numericData.push_back(value);
-    }
-}
-
-// Check if you need to resize the array (vector)
-if (numericData.size() < 2) {
-    mdclog_write(MDCLOG_DEBUG, "The array needs to be resized.");
-}
-
-// Print the extracted data
-for (const double& num : numericData) {
-    mdclog_write(MDCLOG_DEBUG, "Received numerical data: %f", num);
-}
-
-
-close(clientSocket);
-
-
-
-
-
-
-
-
-
-
-
-		metricArray.clear();
-		
-		int ue_name = it->first;
+	    int ue_name = it->first;
 		mdclog_write(MDCLOG_INFO,"UE NAME '%d':",ue_name);
 
 		if(ue_name==70) 
